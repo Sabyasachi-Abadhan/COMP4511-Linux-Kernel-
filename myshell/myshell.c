@@ -7,11 +7,17 @@
 
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <limits.h>
 
 #define MAX_CMDLINE_LEN 256
 #define ARG_MAX_NUM 256
 
+/* Sirui Xie */
+/* sxieab@ust.hk */
+/* stuID: 20091029 */
+/* COMP 4511 PA 2*/
 /* function prototypes go here... */
 
 void show_prompt();
@@ -21,6 +27,7 @@ void process_cmd(char *cmdline);
 void process_amp(char *cmdline);
 int process_and_or(char *cmdline);
 int process_pipe(char *cmdline);
+int process_redirect(char *cmdline);
 int process_unit(char *cmdline);
 int find_file(char* filename);
 
@@ -44,15 +51,15 @@ int main()
 
 void process_cmd(char *cmdline){
    if(*cmdline=='|'&&*(cmdline+1)!='|'){
-   		printf("-myshell: syntax error near unexpected token `|'\n");
+   		fprintf(stderr, "-myshell: syntax error near unexpected token `|'\n");
    		return;
    }
    else if(*cmdline=='&'&&*(cmdline+1)!='&'){
-   		printf("-myshell: syntax error near unexpected token `&'\n");
+   		fprintf(stderr, "-myshell: syntax error near unexpected token `&'\n");
    		return;
    }
    else if (*cmdline=='&'&&*(cmdline+1)=='&'){
-   		printf("-myshell: syntax error near unexpected token `&&'\n");
+   		fprintf(stderr, "-myshell: syntax error near unexpected token `&&'\n");
    		return;
    	}
 	process_amp(cmdline);
@@ -87,7 +94,7 @@ void process_amp(char *cmdline){
 		if(pos_amp==NULL) process_and_or(cmdline);
 		else{
 				if(pos_amp == cmdline) {
-				printf("-myshell: syntax error near unexpected token `&'\n");
+				fprintf(stderr, "-myshell: syntax error near unexpected token `&'\n");
 				//return 1;
 			}
 			else if(pos_amp!=cmdline+n-1){
@@ -100,7 +107,6 @@ void process_amp(char *cmdline){
 					process_amp(++pos_amp);
 				}
 				else{
-					printf("+++++Run in background++++++\n");
 					//return process_and_or(cmdline);
 					int flag = process_and_or(cmdline);
 					printf("++++Finish in background++++\n");
@@ -116,7 +122,6 @@ void process_amp(char *cmdline){
 					//return 0;
 				}
 				else{
-					printf("+++++Run in background++++++\n");
 					//return process_and_or(cmdline);
 					int flag = process_and_or(cmdline);
 					printf("++++Finish in background++++\n");
@@ -136,17 +141,17 @@ int process_and_or(char *cmdline){
 
    char *token_a = strstr(cmdline, AND);
    char *token_b = strstr(cmdline, OR);
-   int n = strlen(cmdline);
 
    strtrim(cmdline);
+   int n = strlen(cmdline);
    
 
    if(token_a==cmdline || token_a==cmdline+n-2) {
-   		printf("-myshell: syntax error near unexpected token `&&'\n");
+   		fprintf(stderr, "-myshell: syntax error near unexpected token `&&'\n");
    		return 1;
    }
    else if(token_b==cmdline || token_b==cmdline+n-2) {
-   		printf("-myshell: syntax error near unexpected token `||'\n");
+   		fprintf(stderr, "-myshell: syntax error near unexpected token `||'\n");
    		return 1;
    }
    else if(token_a!=NULL && token_b!=NULL){
@@ -191,7 +196,7 @@ int process_pipe(char* cmdline){
 	strtrim(cmdline);
 
 	if(cmdline[strlen(cmdline)-1]=='|'||*cmdline=='|') {
-		printf("-myshell: syntax error near unexpected token `|'\n");
+		fprintf(stderr, "-myshell: syntax error near unexpected token `|'\n");
 		return 1;
 	}
 	else{
@@ -229,7 +234,6 @@ int process_pipe(char* cmdline){
 	}
 }
 
-
 int process_unit(char *cmdline)
 {
 	const char* EXIT = "exit";
@@ -240,36 +244,80 @@ int process_unit(char *cmdline)
 	pid_t child_pid;
 
 	char* token;
+	int in = 0;
+	int out = 0;
+	char* input;
+	char* output;
 
-	token = strtok(cmdline, SPACE);
+	char* cmd = strdup(cmdline);
+
+	token = strtok(cmd, SPACE);
 	//if(token!=NULL){
 		if(strcmp (token, EXIT)==0){
+			free(cmd);
 			exit(0);
 		}
 		else if(strcmp (token, CD)==0){
 			token = strtok(NULL, SPACE);
 			if(token==NULL) {
 				chdir(getenv("HOME"));
+				free(cmd);
 				return 0;
 			}
             else if(chdir(token)!=0) {
-            	printf("-myshell: cd: %s: no such file or directory\n", token);
+            	fprintf(stderr, "-myshell: cd: %s\n", strerror(errno));
+            	free(cmd);
             	return 1;
             }
-            else return 0;
+            else {
+            	free(cmd);
+            	return 0;
+            }
 		}
 		else {
+			if(strchr(token, '<')!=NULL) {in = 1;}
+			if(strchr(token, '>')!=NULL) {out = 1;}
+
+			if(in&&out){
+				char* tmp_in = strchr(token, '<');
+				char* tmp_out = strchr(token, '>');
+				input = tmp_in+1;
+				strtrim(input);
+				output = tmp_out+1;
+				strtrim(output);
+				*tmp_in = '\0';
+				*tmp_out = '\0';
+			}
+			else if(in){
+				char* tmp_in = strchr(token, '<');
+				input = tmp_in+1;
+				strtrim(input);
+				*tmp_in = '\0';
+			}
+			else if(out){
+				char* tmp_out = strchr(token, '>');
+				output = tmp_out+1;
+				strtrim(output);
+				*tmp_out = '\0';
+			}
+
 			if(find_file(token)){
 				char *argv [ARG_MAX_NUM];
 				int i = 0;
 				int flag = 0;;
 
-				while(token!=NULL){
+				if(strchr(cmdline, '<')!=NULL) {in = 1; }
+				if(strchr(cmdline, '>')!=NULL) {out = 1; }
+
+				while(token!=NULL && token-cmd<strlen(cmdline)){
 					if(i<ARG_MAX){
 						argv[i] = token;
+						
+						if(strchr(argv[i], '<')!=NULL) {break; }
+						if(strchr(argv[i], '>')!=NULL) {break; }
 					}
 					else{
-						printf("-myshell: %s: too many parameters\n", argv[0]);
+						fprintf(stderr, "-myshell: %s: too many parameters\n", argv[0]);
 						return 1;
 					}
 					/*As strtok is called in find_file, 
@@ -279,22 +327,77 @@ int process_unit(char *cmdline)
 				}
 				argv[i]=0;
 
+				if(in&&out){
+               		char* tmp_in = strchr(cmdline, '<');
+               		input = tmp_in+1;
+               		strtrim(input);
+               		for(int i=0; i< strlen(input); ++i){
+                  		if(isspace(input[i])) input[i]='\0';
+                  		break;
+               		}
+               		char* tmp_out = strchr(cmdline, '>');
+               		output = strtok(tmp_out+1, SPACE);
+               		strtrim(output);
+               		*tmp_in = '\0';
+               		*tmp_out = '\0';
+               		*(tmp_out-1) = '\0';
+               	}
+				else if(in){
+					char* tmp_in = strchr(cmdline, '<');
+					input = strtok(tmp_in+1, SPACE);
+					for(int i=0; i< strlen(input); ++i){
+						if(isspace(input[i])) input[i]='\0';
+						break;
+					}
+					strtrim(input);
+					*tmp_in = '\0';
+					
+				}
+				else if(out){
+					char* tmp_out = strchr(cmdline, '>');
+					output = strtok(tmp_out+1, SPACE);
+					strtrim(output);
+					*tmp_out = '\0';
+				}
+
 				pid_t pid = fork();
 				if(pid > 0){			
 					wait(&child_status);
 					return child_status;
 				}
 				else{
+					    if (in){
+        					int fd0 = open(input, O_RDONLY);
+        					if(fd0==-1){
+        						fprintf(stderr, "-myshell: %s: No such file or directory\n", input);
+								exit(1);
+        					}
+       						dup2(fd0, STDIN_FILENO);
+        					close(fd0);
+    					}
+
+    					if (out){
+    						fflush(stdout);
+        					int fd1 = open(output,O_WRONLY|O_CREAT|O_TRUNC,0644);
+        					dup2(fd1, STDOUT_FILENO);
+        					close(fd1);
+    					}
+
 					flag = execvp(argv[0], argv);
 					
 					if(flag<0) {
-						printf("-myshell: %s: %s\n", argv[0], strerror(errno));
+						fprintf(stderr, "-myshell: %s: %s\n", argv[0], strerror(errno));
+						free(cmd);
 						exit(1);
 					}
+					free(cmd);
 					exit(0);
 				} 
 			}
-			else return 1;
+			else {
+				free(cmd);
+				return 1;
+			}
 			
 		}
 	
@@ -331,8 +434,9 @@ int find_file(char* filename){
    if(exist){
       return 1;
    } 
-   else {
-      printf("-myshell: %s: command not found\n", filename);
+   else if(strcmp(filename, "./")>0){return 1;}
+   else{
+      fprintf(stderr, "-myshell: %s: command not found\n", filename);
       return 0;
    }
 }
